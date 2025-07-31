@@ -1,4 +1,4 @@
-/*
+/*&sx
  * radio.c
  * 
  * Copyright The TTC 2.0 Contributors.
@@ -26,10 +26,10 @@
  * \author Gabriel Mariano Marcelino <gabriel.mm8@gmail.com>
  * \author Miguel Boing <miguelboing13@gmail.com>
  *
- * \version 1.0.0
+ * \version 0.5.1
  *
- * \date 2024/09/09
- * 
+ * \date 2024/04/22
+ *
  * \addtogroup radio
  * \{
  */
@@ -38,22 +38,21 @@
 #include <task.h>
 
 #include <system/sys_log/sys_log.h>
-
 #include <drivers/si446x/si446x.h>
-#include <drivers/si446x/si446x_registers.h>
+#include <drivers/sx127x/Sx127x_port.h>
 #include <devices/leds/leds.h>
-
 #include "radio.h"
 
 int radio_init(void)
 {
-    sys_log_print_event_from_module(SYS_LOG_INFO, RADIO_MODULE_NAME, "Initializing radio device...");
+    int err = -1;
+    sys_log_print_event_from_module(SYS_LOG_INFO, RADIO_MODULE_NAME,
+                                    "Initializing radio device...");
     sys_log_new_line();
 
-    int err = -1;
-    if (si446x_init() == 0)
+    if (sx127x_radio_init() == 0)
     {
-        if (si446x_rx_init())
+        if (sx127x_rx_init() == true)
         {
             err = 0;
         }
@@ -66,34 +65,27 @@ int radio_send(uint8_t *data, uint16_t len)
 {
     int err = -1;
 
-    if (si446x_mutex_take() == 0)
+    sys_log_print_event_from_module(SYS_LOG_INFO, RADIO_MODULE_NAME,
+                                    "Transmitting ");
+    sys_log_print_uint(len);
+    sys_log_print_msg(" byte(s)...");
+    sys_log_new_line();
+    sys_log_dump_hex(data, len);
+    sys_log_new_line();
+
+    led_set(LED_DOWNLINK);
+
+    if (sx127x_transmit(&sx1278_phy, data, len, 2000))
     {
-        sys_log_print_event_from_module(SYS_LOG_INFO, RADIO_MODULE_NAME, "Transmitting ");
-        sys_log_print_uint(len);
-        sys_log_print_msg(" byte(s)...");
-        sys_log_new_line();
-
-        led_set(LED_DOWNLINK);
-
-        if(si446x_tx_long_packet(data, len))
-        {
-            led_clear(LED_DOWNLINK);
-
-            if(si446x_rx_init())
-            {
-                err = 0;
-            }
-        }
-
         led_clear(LED_DOWNLINK);
 
-        si446x_mutex_give();
+        if (sx127x_rx_init() == true)
+        {
+            err = 0;
+        }
     }
-    else
-    {
-        sys_log_print_event_from_module(SYS_LOG_ERROR, RADIO_MODULE_NAME, "Couldn't get mutex control.");
-        sys_log_new_line();
-    }
+
+    sx127x_rx_init();
 
     return err;
 }
@@ -104,35 +96,22 @@ int radio_recv(uint8_t *data, uint16_t len, uint32_t timeout_ms)
 
     uint16_t i = 0;
 
-    if (si446x_mutex_take() == 0)
+    uint8_t irq = sx127x_get_irq_flags(&sx1278_phy);
+
+    if (irq & FlagRxDone)
     {
-        for(i = 0; i < (timeout_ms/100); i++)
-        {
-            if (si446x_wait_nirq())
-            {
-                res = (int)si446x_rx_packet(data, len);
+        uint8_t size = sx127x_get_last_packet_size(&sx1278_phy);
 
-                sys_log_print_event_from_module(SYS_LOG_INFO, RADIO_MODULE_NAME, "Received ");
-                sys_log_print_uint(res);
-                sys_log_print_msg(" byte(s)...");
-                sys_log_new_line();
+        if (size > len)
+            return -1;
 
-                si446x_clear_interrupts();
+        res = size;
 
-                si446x_rx_init();
+        sx127x_read_fifo(&sx1278_phy, data, size);
 
-                break;
-            }
+        sx127x_clear_irq_flags(&sx1278_phy, irq);
 
-            vTaskDelay(pdMS_TO_TICKS(500));
-        }
-
-        si446x_mutex_give();
-    }
-    else
-    {
-        sys_log_print_event_from_module(SYS_LOG_ERROR, RADIO_MODULE_NAME, "Couldn't get mutex control.");
-        sys_log_new_line();
+        sx127x_rx_init();
     }
 
     return res;
@@ -140,75 +119,30 @@ int radio_recv(uint8_t *data, uint16_t len, uint32_t timeout_ms)
 
 int radio_available(void)
 {
-    return si446x_gpio_get_pin(SI446X_GPIO_NIRQ);
+    uint8_t irq = sx127x_get_irq_flags(&sx1278_phy);
+    if(irq & FlagRxDone)
+        return 0;
+    return -1;
+
+//    return si446x_gpio_get_pin(SI446X_GPIO_NIRQ);//TODO: SUBSTITUIR PARA A VERIFICAÇÃO DO SX127X
 }
 
 int radio_sleep(void)
 {
     int err = -1;
 
-    if (si446x_mutex_take() == 0)
-    {
-    err = si446x_enter_standby_mode();
-
-    si446x_mutex_give();
-    }
-    else
-    {
-        sys_log_print_event_from_module(SYS_LOG_ERROR, RADIO_MODULE_NAME, "Couldn't get mutex control.");
-        sys_log_new_line();
-    }
-
     return err;
-}
-
-void radio_reset(void)
-{
-    sys_log_print_event_from_module(SYS_LOG_INFO, RADIO_MODULE_NAME, "Reseting radio device...");
-    sys_log_new_line();
-
-    si446x_shutdown();
-    si446x_delay_ms(10U);
-    si446x_power_up();
 }
 
 int radio_get_temperature(radio_temp_t *temp)
 {
-    int err = -1;
-
-    if(si446x_mutex_take() == 0)
-    {
-        if (si446x_get_temperature((uint16_t *)temp))
-        {
-            err = 0;
-        }
-
-        si446x_mutex_give();
-    }
-    else
-    {
-        sys_log_print_event_from_module(SYS_LOG_ERROR, RADIO_MODULE_NAME, "Couldn't get mutex control.");
-        sys_log_new_line();
-    }
-
-    return err;
+    /* TODO */
+    return -1;
 }
 
 int radio_get_rssi(radio_rssi_t *rssi)
 {
-    int err = -1;
-
-    uint8_t modem_status[8];
-
-    if (si446x_get_cmd(SI446X_CMD_GET_MODEM_STATUS, modem_status, 8U))
-    {
-        err = 0;
-    }
-
-    *rssi = (radio_rssi_t)modem_status[2];
-
-    return err;
-
+    return sx127x_get_last_packet_rssi(&sx1278_phy);
 }
 
 /** \} End of radio group */

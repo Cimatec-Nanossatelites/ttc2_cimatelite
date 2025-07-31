@@ -392,7 +392,7 @@ static uint8_t spi_read_byte(uint16_t base_address)
     return res;
 }
 
-static uint8_t spi_transfer_byte(uint16_t base_address, uint8_t wb)
+uint8_t spi_transfer_byte(uint16_t base_address, uint8_t wb)
 {
     spi_write_byte(base_address, wb);
 

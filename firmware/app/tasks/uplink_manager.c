@@ -108,7 +108,7 @@ void vTaskUplinkManager(void)
                 }
                 else
                 {
-                    (void)radio_reset();
+//                    (void)radio_reset(); // TODO: radio_reset nao existia no firmware antigo, deve ser implementado ?
                     ttc_data_buf.n_conseq_failed_packets++;
 
                     sys_log_print_event_from_module(SYS_LOG_ERROR, TASK_UPLINK_MANAGER_NAME, "Failed to decode a new packet.");
@@ -120,7 +120,7 @@ void vTaskUplinkManager(void)
             }
             else
             {
-                (void)radio_reset();
+//                (void)radio_reset();
                 ttc_data_buf.n_conseq_failed_packets++;
 
                 sys_log_print_event_from_module(SYS_LOG_ERROR, TASK_UPLINK_MANAGER_NAME, "Failed to receive a new packet.");

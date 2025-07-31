@@ -1,759 +1,421 @@
-/*
- * sx127x.c
- * 
- * Copyright The TTC 2.0 Contributors.
- * 
- * This file is part of TTC 2.0.
- * 
- * TTC 2.0 is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- * 
- * TTC 2.0 is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- * 
- * You should have received a copy of the GNU General Public License
- * along with TTC 2.0. If not, see <http:/\/www.gnu.org/licenses/>.
- * 
- */
-
 /**
- * \brief SX127x driver implementation.
- * 
- * \author Gabriel Mariano Marcelino <gabriel.mm8@gmail.com>
- * 
- * \version 0.3.2
- * 
- * \date 2021/12/14
- * 
- * \addtogroup sx127x
- * \{
+ * @ Author: Morran Smith
+ * @ Create Time: 2019-06-01 09:51:05
+ * @ Modified by: Morran Smith
+ * @ Modified time: 2019-06-02 21:30:21
+ * @ Description:
  */
-
-#include <config/config.h>
-#include <system/sys_log/sys_log.h>
 
 #include "sx127x.h"
+#include "sx127x_io.h"
+#include "sx127x_private.h"
+#include "sx127x_registers.h"
 
-static uint8_t header_mode;
-static uint8_t payload_length = 0;
-
-int sx127x_init(void)
+uint8_t sx127x_reset(sx127x_dev_t* dev)
 {
-    int err = 0;
+    dev->common->reset_control(false);
+    dev->common->delay(10);
+    dev->common->reset_control(true);
+    dev->common->delay(10);
 
-    if (sx127x_gpio_init() != 0)
-    {
-        err = -1;
-    #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-        sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Error initializing the GPIO pins!");
-        sys_log_new_line();
-    #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-    }
-
-    if (sx127x_spi_init() != 0)
-    {
-        err = -1;
-    #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-        sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Error initializing the SPI port!");
-        sys_log_new_line();
-    #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-    }
-
-    if (sx127x_power_on_reset() != 0)
-    {
-        err = -1;
-    }
-
-    if (sx127x_config() != 0)
-    {
-        err = -1;
-    #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-        sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Error loading the configuration parameters!");
-        sys_log_new_line();
-    #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-    }
-
-    return err;
+    return 0;
 }
 
-int sx127x_rx_init(void)
+void sx127x_dio_0_callback(sx127x_dev_t* dev)
 {
-    int err = -1;
-    if(header_mode == SX127X_IMPLICIT_HEADER_MODE)   sx127x_set_payload_len(payload_length);
+    volatile uint8_t irq = sx127x_get_irq_flags(dev);
 
-    /*Enable RxDoneIrq */
-    sx127x_set_rx_interrupt();
+    switch (dev->settings.mode) {
+    case MODE_TX:
+        if (!(irq & FlagTxDone))
+            break;
 
-    /* Clear IRQ Flag */
-    sx127x_clear_interrupt();
+        sx127x_clear_irq_flags(dev, FlagTxDone);
 
-    /* Set FIFO address */
-    sx127x_set_fifo_addr_ptr(SX127X_REG_FIFO_RX_BASE_ADDR);
+        dev->callbacks->tx_done();
 
-    /* Start RX */
-    err = sx127x_enter_rx_mode();
+        break;
+    case MODE_RXCONTINUOUS:
+        if (irq & FlagPayloadCrcError) {
+            sx127x_clear_irq_flags(dev, FlagPayloadCrcError);
 
-    return err;
-}
-
-int sx127x_tx_packet(uint8_t *data, uint16_t len)
-{
-    return -1;
-}
-
-int sx127x_rx_packet(uint8_t *data, uint16_t *len)
-{
-    return -1;
-}
-
-int sx127x_wait_irq(uint8_t irq_mask)
-{
-    int err = -1;
-
-    uint8_t flag = UINT8_MAX;
-
-    if (sx127x_read_reg(SX127X_REG_IRQ_FLAGS, &flag) == 0)
-    {
-        /* if irq flag was set */
-        if (flag & irq_mask)
-        {
-            err = 0;
+            dev->callbacks->rx_crc_error();
+            break;
         }
-    }
 
-    return err;
+        if (irq & FlagRxTimeout) {
+            sx127x_clear_irq_flags(dev, FlagRxTimeout);
+
+            dev->callbacks->rx_timeout();
+            break;
+        }
+        //no break
+    case MODE_RXSINGLE: {
+
+        if (!(irq & FlagRxDone))
+            break;
+
+        uint8_t size = sx127x_get_last_packet_size(dev);
+        static uint8_t buffer[128];
+
+        sx127x_read_fifo(dev, buffer, size);
+
+        sx127x_clear_irq_flags(dev, FlagRxDone);
+
+        dev->callbacks->rx_done(buffer, size);
+
+        break;
+    }
+    default:
+        break;
+    }
 }
 
-int sx127x_enter_standby_mode(void)
+void sx127x_dio_1_callback(sx127x_dev_t* dev)
 {
-    int err = 0;
 
-    if ((sx127x_set_ant_switch(SX127X_MODE_STANDBY) != 0) ||
-        (sx127x_write_reg(SX127X_REG_OP_MODE, SX127X_OP_MODE_STBY | SX127X_FREQUENCY_BAND) != 0))
-    {
-    #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-        sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Error entering in standby mode!");
-        sys_log_new_line();
-    #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-        err = -1;
-    }
+    if (dev->settings.mode != MODE_RXSINGLE)
+        return;
 
-    return err;
+    if (!(sx127x_get_irq_flags(dev) & FlagRxTimeout))
+        return;
+
+    sx127x_clear_irq_flags(dev, FlagRxTimeout);
+
+    dev->callbacks->rx_timeout();
 }
 
-int sx127x_enter_sleep_mode(void)
+void sx127x_dio_2_callback(sx127x_dev_t* dev)
 {
-    int err = 0;
-
-    if ((sx127x_set_ant_switch(SX127X_MODE_STANDBY) != 0) ||
-        (sx127x_write_reg(SX127X_REG_OP_MODE, SX127X_OP_MODE_SLEEP | SX127X_FREQUENCY_BAND) != 0))
-    {
-    #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-        sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Error entering in sleep mode!");
-        sys_log_new_line();
-    #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-        err = -1;
-    }
-
-    return err;
 }
 
-int sx127x_clear_interrupt(void)
+void sx127x_dio_3_callback(sx127x_dev_t* dev)
 {
-    return sx127x_write_reg(SX127X_REG_IRQ_FLAGS, 0xFFU);
+
+    if (!(dev->settings.mode == MODE_RXSINGLE || dev->settings.mode == MODE_RXCONTINUOUS))
+        return;
+
+    if (!(sx127x_get_irq_flags(dev) & FlagPayloadCrcError))
+        return;
+
+    dev->callbacks->rx_crc_error();
+
+    sx127x_clear_irq_flags(dev, FlagPayloadCrcError);
 }
 
-int sx127x_set_frequency(uint32_t freq)
+void sx127x_dio_4_callback(sx127x_dev_t* dev)
 {
-    int err  = 0;
-
-    uint32_t frf = UINT32_MAX;
-    uint32_t temp1 = UINT32_MAX;
-    uint32_t temp2 = UINT32_MAX;
-    uint8_t reg[3] = {0};
-
-    temp1 = freq / 1000000UL;
-    temp2 = SX127X_XOSC_HZ / 1000000UL;
-    frf = temp1 * 524288UL / temp2;
-
-    temp1 = freq % 1000000UL/1000UL;
-    temp2 = SX127X_XOSC_HZ / 1000UL;
-    frf = frf + temp1 * 524288UL / temp2;
-
-    temp1 = freq % 1000UL;
-    temp2 = SX127X_XOSC_HZ;
-    frf = frf + temp1 * 524288UL / temp2;
-
-    reg[0] = frf >> 16U & 0xFFU;
-    reg[1] = frf >> 8U & 0xFFU;
-    reg[2] = frf & 0xFFU;
-
-    /* Writing the value to FRF register */
-    if ((sx127x_write_reg(SX127X_REG_FRF_MSB, reg[0]) != 0) ||
-        (sx127x_write_reg(SX127X_REG_FRF_MID, reg[1]) != 0) ||
-        (sx127x_write_reg(SX127X_REG_FRF_LSB, reg[2]) != 0))
-    {
-    #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-        sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Error writing to register FRF!");
-        sys_log_new_line();
-    #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-    }
-
-    /* Checking the register's value */
-    uint8_t reg_buf[3] = {0};
-
-    if ((sx127x_read_reg(SX127X_REG_FRF_MSB, &reg_buf[0]) != 0) ||
-        (sx127x_read_reg(SX127X_REG_FRF_MID, &reg_buf[1]) != 0) ||
-        (sx127x_read_reg(SX127X_REG_FRF_LSB, &reg_buf[2]) != 0))
-    {
-    #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-        sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Error reading the register FRF!");
-        sys_log_new_line();
-    #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-    }
-
-    if ((reg[0] != reg_buf[0]) || (reg[1] != reg_buf[1]) || (reg[2] != reg_buf[2]))
-    {
-    #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-        sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Error writing to FRF registers!");
-        sys_log_new_line();
-    #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-        err = -1;
-    }
-
-    return err;
 }
 
-int sx127x_set_rf_param(uint8_t bw, uint8_t cr, uint8_t sf, uint8_t crc)
+void sx127x_dio_5_callback(sx127x_dev_t* dev)
 {
-    int err = -1;
+}
 
-    /* Check if the data is correct */
-    if (((bw & 0x0FU) == 0) && ((bw >> 8) <= 0x09U))
+uint8_t sx127x_init(sx127x_dev_t* dev, sx127x_radio_settings_t* settings)
+{
+    sx127x_reset(dev);
+
+    if (sx127x_get_version(dev) != VERSION)
+        return -1;
+
+    if (sx127x_set_sleep(dev) != 0)
+        return -1;
+
+    if (sx127x_set_modulation_mode(dev, settings->modulation) != 0)
+        return -1;
+
+    if (sx127x_set_frequency(dev, settings->frequency) != 0)
+        return -1;
+
+    if (sx127x_set_pa_select(dev, settings->pa_select) != 0)
+        return -1;
+
+    if (sx127x_set_power(dev, settings->power) != 0)
+        return -1;
+
+    if (sx127x_set_band_width(dev, settings->band_width) != 0)
+        return -1;
+
+    if (sx127x_set_coding_rate(dev, settings->coding_rate) != 0)
+        return -1;
+
+    if (sx127x_set_spreading_factor(dev, settings->spreading_factor) != 0)
+        return -1;
+
+    if (sx127x_set_payload_crc_on(dev, settings->payload_crc_on) != 0)
+        return -1;
+
+    if (sx127x_set_preamble_length(dev, settings->preamble_length) != 0)
+        return -1;
+
+    if (sx127x_set_sync_word(dev, settings->sync_word) != 0)
+        return -1;
+
+    return 0;
+}
+
+uint8_t sx127x_load_current_parameters(sx127x_dev_t* dev)
+{
+    sx127x_get_modulation_mode(dev);
+    sx127x_get_mode(dev);
+    sx127x_get_pa_select(dev);
+    sx127x_get_power(dev);
+    sx127x_get_spreading_factor(dev);
+    sx127x_get_band_width(dev);
+    sx127x_get_coding_rate(dev);
+    sx127x_get_payload_crc_on(dev);
+    sx127x_get_preamble_length(dev);
+    sx127x_get_frequency(dev);
+    sx127x_get_sync_word(dev);
+
+    return 0;
+}
+
+uint8_t sx127x_get_version(sx127x_dev_t* dev)
+{
+    return sx127x_read_register(dev->spi, RegVersion);
+}
+
+int sx127x_get_rssi(sx127x_dev_t* dev)
+{
+    return ((dev->settings.frequency < 520000000) ? -164 : -157) + (int)(int8_t)(sx127x_read_register(dev->spi, RegRssiValue));
+}
+
+int sx127x_get_last_packet_rssi(sx127x_dev_t* dev)
+{
+    if (sx127x_get_last_packet_snr(dev) >= 0)
+        return ((dev->settings.frequency < 520000000) ? -164 : -157) + (16 / 15 * (int)(int8_t)(sx127x_read_register(dev->spi, RegPktRssiValue)));
+    return ((dev->settings.frequency < 520000000) ? -164 : -157) + (int)(int8_t)(sx127x_read_register(dev->spi, RegPktRssiValue));
+}
+
+int sx127x_get_last_packet_snr(sx127x_dev_t* dev)
+{
+    return (int)(int8_t)(sx127x_read_register(dev->spi, RegPktSnrValue)) / 4;
+}
+
+uint8_t sx127x_set_sleep(sx127x_dev_t* dev)
+{
+    uint8_t reg = sx127x_read_register(dev->spi, RegOpMode);
+
+    sx127x_write_register(dev->spi, RegOpMode, (reg & 0xF8) | MODE_SLEEP);
+
+    dev->settings.mode = MODE_SLEEP;
+
+    return 0;
+}
+
+uint8_t sx127x_set_standby(sx127x_dev_t* dev)
+{
+    uint8_t reg = sx127x_read_register(dev->spi, RegOpMode);
+
+    sx127x_write_register(dev->spi, RegOpMode, (reg & 0xF8) | MODE_STDBY);
+
+    dev->settings.mode = MODE_STDBY;
+
+    return 0;
+}
+
+uint8_t sx127x_transmit(sx127x_dev_t* dev, uint8_t* buffer, uint8_t size, uint32_t delay)
+{
+    if (sx127x_set_dio_config(dev, (DIO_MODE_DISABLE << DIO_0_MAPPING) | (DIO_MODE_DISABLE << DIO_1_MAPPING) | (DIO_MODE_DISABLE << DIO_2_MAPPING) | (DIO_MODE_DISABLE << DIO_3_MAPPING) | (DIO_MODE_DISABLE << DIO_4_MAPPING) | (DIO_MODE_DISABLE << DIO_5_MAPPING)) != 0) // Ã�Å¾Ã‘â€šÃ�ÂºÃ�Â»Ã‘Å½Ã‘â€¡Ã�ÂµÃ�Â½Ã�Â¸Ã�Âµ DIO
+        return -1;
+
+    if (sx127x_clear_irq_flags(dev, FlagTxDone) != 0) // Ã�ï¿½Ã�Â° Ã�Â²Ã‘ï¿½Ã‘ï¿½Ã�ÂºÃ�Â¸Ã�Â¹ Ã‘ï¿½Ã�Â»Ã‘Æ’Ã‘â€¡Ã�Â°Ã�Â¹ Ã�Â¾Ã‘â€¡Ã�Â¸Ã‘ï¿½Ã‘â€šÃ‘â‚¬Ã�Â° Ã�Â¿Ã‘â‚¬Ã�ÂµÃ‘â‚¬Ã‘â€¹Ã�Â²Ã�Â°Ã�Â½Ã�Â¸Ã‘ï¿½ TxDone
+        return -1;
+
+    if (sx127x_set_irq_flags_mask(dev, FlagTxDone) != 0) // Ã�â€™Ã�ÂºÃ�Â»Ã‘Å½Ã‘â€¡Ã�ÂµÃ�Â½Ã�Â¸Ã�Âµ Ã�Â¿Ã‘â‚¬Ã�ÂµÃ‘â‚¬Ã‘â€¹Ã�Â²Ã�Â°Ã�Â½Ã�Â¸Ã‘ï¿½ Ã�Â¿Ã�Â¾ Ã�Â¾Ã�ÂºÃ�Â¾Ã�Â½Ã‘â€¡Ã�Â°Ã�Â½Ã�Â¸Ã�Â¸ Ã�Â¾Ã‘â€šÃ�Â¿Ã‘â‚¬Ã�Â°Ã�Â²Ã�ÂºÃ�Â¸
+        return -1;
+
+    if (sx127x_set_standby(dev) != 0) // FIFO Ã�Â½Ã�Âµ Ã�Â´Ã�Â¾Ã‘ï¿½Ã‘â€šÃ‘Æ’Ã�Â¿Ã�ÂµÃ�Â½ Ã�Â² Ã‘â‚¬Ã�ÂµÃ�Â¶Ã�Â¸Ã�Â¼Ã�Âµ SLEEP
+        return -1;
+
+    if (sx127x_write_fifo(dev, buffer, size) != 0) // Ã�â€”Ã�Â°Ã�Â³Ã‘â‚¬Ã‘Æ’Ã�Â·Ã�ÂºÃ�Â° FIFO
+        return -1;
+
+    if (sx127x_set_tx(dev) != 0) // Ã�ï¿½Ã�Â°Ã‘â€¡Ã�Â°Ã�Â»Ã�Â¾ Ã�Â¾Ã‘â€šÃ�Â¿Ã‘â‚¬Ã�Â°Ã�Â²Ã�ÂºÃ�Â¸
+        return -1;
+
+    while (!(sx127x_get_irq_flags(dev) & FlagTxDone))
     {
-        if (((cr & 0xF1U) == 0) && ((cr >> 1) <= 0x04U) && ((cr >> 1) >= 0x00U))
+        dev->common->delay(1);
+        if (!delay--)
+            return -1;
+    }
+
+    return 0;
+}
+
+uint8_t sx127x_transmit_it(sx127x_dev_t* dev, uint8_t* buffer, uint8_t size)
+{
+    if (sx127x_set_dio_config(dev, (DIO_MODE_1 << DIO_0_MAPPING) | (DIO_MODE_DISABLE << DIO_1_MAPPING) | (DIO_MODE_DISABLE << DIO_2_MAPPING) | (DIO_MODE_DISABLE << DIO_3_MAPPING) | (DIO_MODE_DISABLE << DIO_4_MAPPING) | (DIO_MODE_DISABLE << DIO_5_MAPPING)) != 0) // Ã�â€™Ã�ÂºÃ�Â»Ã‘Å½Ã‘â€¡Ã�ÂµÃ�Â½Ã�Â¸Ã�Âµ DIO0
+        return -1;
+
+    if (sx127x_clear_irq_flags(dev, FlagTxDone) != 0) // Ã�ï¿½Ã�Â° Ã�Â²Ã‘ï¿½Ã‘ï¿½Ã�ÂºÃ�Â¸Ã�Â¹ Ã‘ï¿½Ã�Â»Ã‘Æ’Ã‘â€¡Ã�Â°Ã�Â¹ Ã�Â¾Ã‘â€¡Ã�Â¸Ã‘ï¿½Ã‘â€šÃ‘â‚¬Ã�Â° Ã�Â¿Ã‘â‚¬Ã�ÂµÃ‘â‚¬Ã‘â€¹Ã�Â²Ã�Â°Ã�Â½Ã�Â¸Ã‘ï¿½ TxDone
+        return -1;
+
+    if (sx127x_set_irq_flags_mask(dev, FlagTxDone) != 0) // Ã�â€™Ã�ÂºÃ�Â»Ã‘Å½Ã‘â€¡Ã�ÂµÃ�Â½Ã�Â¸Ã�Âµ Ã�Â¿Ã‘â‚¬Ã�ÂµÃ‘â‚¬Ã‘â€¹Ã�Â²Ã�Â°Ã�Â½Ã�Â¸Ã‘ï¿½ Ã�Â¿Ã�Â¾ Ã�Â¾Ã�ÂºÃ�Â¾Ã�Â½Ã‘â€¡Ã�Â°Ã�Â½Ã�Â¸Ã�Â¸ Ã�Â¾Ã‘â€šÃ�Â¿Ã‘â‚¬Ã�Â°Ã�Â²Ã�ÂºÃ�Â¸
+        return -1;
+
+    if (sx127x_set_standby(dev) != 0) // FIFO Ã�Â½Ã�Âµ Ã�Â´Ã�Â¾Ã‘ï¿½Ã‘â€šÃ‘Æ’Ã�Â¿Ã�ÂµÃ�Â½ Ã�Â² Ã‘â‚¬Ã�ÂµÃ�Â¶Ã�Â¸Ã�Â¼Ã�Âµ SLEEP
+        return -1;
+
+    if (sx127x_write_fifo(dev, buffer, size) != 0) // Ã�â€”Ã�Â°Ã�Â³Ã‘â‚¬Ã‘Æ’Ã�Â·Ã�ÂºÃ�Â° FIFO
+        return -1;
+
+    if (sx127x_set_tx(dev) != 0) // Ã�ï¿½Ã�Â°Ã‘â€¡Ã�Â°Ã�Â»Ã�Â¾ Ã�Â¾Ã‘â€šÃ�Â¿Ã‘â‚¬Ã�Â°Ã�Â²Ã�ÂºÃ�Â¸
+        return -1;
+
+    return 0;
+}
+
+uint8_t sx127x_receive_single(sx127x_dev_t* dev, uint8_t* buffer, uint8_t* size)
+{
+    if (sx127x_set_dio_config(dev, (DIO_MODE_DISABLE << DIO_0_MAPPING) | (DIO_MODE_DISABLE << DIO_1_MAPPING) | (DIO_MODE_DISABLE << DIO_2_MAPPING) | (DIO_MODE_DISABLE << DIO_3_MAPPING) | (DIO_MODE_DISABLE << DIO_4_MAPPING) | (DIO_MODE_DISABLE << DIO_5_MAPPING)) != 0) // Ã�Å¾Ã‘â€šÃ�ÂºÃ�Â»Ã‘Å½Ã‘â€¡Ã�ÂµÃ�Â½Ã�Â¸Ã�Âµ DIO
+        return -1;
+
+    if (sx127x_clear_irq_flags(dev, FlagPayloadCrcError | FlagRxDone | FlagRxTimeout) != 0) // Ã�ï¿½Ã�Â° Ã�Â²Ã‘ï¿½Ã‘ï¿½Ã�ÂºÃ�Â¸Ã�Â¹ Ã‘ï¿½Ã�Â»Ã‘Æ’Ã‘â€¡Ã�Â°Ã�Â¹ Ã�Â¾Ã‘â€¡Ã�Â¸Ã‘ï¿½Ã‘â€šÃ‘â‚¬Ã�Â° Ã�Â¿Ã‘â‚¬Ã�ÂµÃ‘â‚¬Ã‘â€¹Ã�Â²Ã�Â°Ã�Â½Ã�Â¸Ã�Â¹
+        return -1;
+
+    if (sx127x_set_irq_flags_mask(dev, FlagPayloadCrcError | FlagRxDone | FlagRxTimeout) != 0) // Ã�â€™Ã�ÂºÃ�Â»Ã‘Å½Ã‘â€¡Ã�ÂµÃ�Â½Ã�Â¸Ã�Âµ Ã�Â¿Ã‘â‚¬Ã�ÂµÃ‘â‚¬Ã‘â€¹Ã�Â²Ã�Â°Ã�Â½Ã�Â¸Ã‘ï¿½ Ã�Â¿Ã�Â¾ Ã�Â¾Ã�ÂºÃ�Â¾Ã�Â½Ã‘â€¡Ã�Â°Ã�Â½Ã�Â¸Ã�Â¸ Ã�Â¾Ã‘â€šÃ�Â¿Ã‘â‚¬Ã�Â°Ã�Â²Ã�ÂºÃ�Â¸
+        return -1;
+
+    if (sx127x_set_standby(dev) != 0) // FIFO Ã�Â½Ã�Âµ Ã�Â´Ã�Â¾Ã‘ï¿½Ã‘â€šÃ‘Æ’Ã�Â¿Ã�ÂµÃ�Â½ Ã�Â² Ã‘â‚¬Ã�ÂµÃ�Â¶Ã�Â¸Ã�Â¼Ã�Âµ SLEEP
+        return -1;
+
+    if (sx127x_set_fifo_rx_pointer(dev, 0) != 0)
+        return -1;
+
+    if (sx127x_set_rx_single(dev) != 0)
+        return -1;
+
+    while (1) {
+        uint8_t irq = sx127x_get_irq_flags(dev);
+
+        if (irq & FlagRxDone)
         {
-            if (((sf & 0x0FU) == 0) && ((sf >> 4) <= 12U) && ((sf >> 4) >= 6U))
-            {
-                if ((crc & 0xFBU) == 0)
-                {
-                    uint8_t temp = UINT8_MAX;
+            if (sx127x_clear_irq_flags(dev, FlagRxDone) != 0)
+                return -1;
 
-                    /* SF=6 must be use in implicit header mode, and have some special setting */
-                    if (sf == SX127X_SPREADING_FACTOR_6)
-                    {
-                        header_mode = SX127X_IMPLICIT_HEADER_MODE;
+            if (!sx127x_get_crc_valid(dev)) {
+                if (sx127x_clear_irq_flags(dev, FlagPayloadCrcError) != 0)
+                    return -1;
 
-                        if (sx127x_write_reg(SX127X_REG_MODEM_CONFIG_1, bw | cr | SX127X_IMPLICIT_HEADER_MODE) != 0)
-                        {
-                        #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-                            sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Error writing to register MODEM_CONFIG_1!");
-                            sys_log_new_line();
-                        #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-                        }
-
-                        if (sx127x_read_reg(SX127X_REG_MODEM_CONFIG_2, &temp) != 0)
-                        {
-                        #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-                            sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Error reading the register MODEM_CONFIG_2!");
-                            sys_log_new_line();
-                        #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-                        }
-
-                        temp = temp & 0x03U;
-
-                        if (sx127x_write_reg(SX127X_REG_MODEM_CONFIG_2, sf | crc | temp) != 0)
-                        {
-                        #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-                            sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Error reading the register MODEM_CONFIG_2!");
-                            sys_log_new_line();
-                        #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-                        }
-
-                        /* According to datasheet */
-                        if (sx127x_read_reg(0x31U, &temp) != 0)
-                        {
-                        #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-                            sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Error reading the register 0x31!");
-                            sys_log_new_line();
-                        #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-                        }
-
-                        temp &= 0xF8U;
-                        temp |= 0x05U;
-
-                        if ((sx127x_write_reg(0x31U, temp) == 0) && (sx127x_write_reg(0x37U, 0x0CU) == 0))
-                        {
-                            err = 0;
-                        }
-                        else
-                        {
-                        #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-                            sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Error writing to registers 0x31 and 0x37!");
-                            sys_log_new_line();
-                        #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-                        }
-                    }
-                    else
-                    {
-                        if (sx127x_read_reg(SX127X_REG_MODEM_CONFIG_2, &temp) != 0)
-                        {
-                        #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-                            sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Error reading the MODEM_CONFIG_2 register!");
-                            sys_log_new_line();
-                        #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-                        }
-
-                        temp = temp & 0x03U;
-
-                        if ((sx127x_write_reg(SX127X_REG_MODEM_CONFIG_1, bw | cr | header_mode) == 0) &&
-                            (sx127x_write_reg(SX127X_REG_MODEM_CONFIG_2, sf | crc | temp) == 0))
-                        {
-                            err = 0;
-                        }
-                        else
-                        {
-                        #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-                            sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Error writing to MODEM_CONFIG registers!");
-                            sys_log_new_line();
-                        #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-                        }
-                    }
-                }
-                else
-                {
-                #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-                    sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Invalid CRC option!");
-                    sys_log_new_line();
-                #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-                }
+                return 1;
             }
-            else
-            {
-            #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-                sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Invalid SF value!");
-                sys_log_new_line();
-            #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
+
+            *size = sx127x_get_last_packet_size(dev);
+            if (sx127x_read_fifo(dev, buffer, *size) != 0)
+                return -1;
+
+            if (sx127x_clear_irq_flags(dev, FlagRxDone) != 0)
+                return -1;
+
+            return 0;
+        } else if (irq & FlagRxTimeout) {
+            if (sx127x_clear_irq_flags(dev, FlagRxTimeout) != 0)
+                return -1;
+
+            return 2;
+        }
+    }
+}
+
+uint8_t sx127x_receive_single_it(sx127x_dev_t* dev)
+{
+    if (sx127x_set_dio_config(dev, (DIO_MODE_0 << DIO_0_MAPPING) | (DIO_MODE_0 << DIO_1_MAPPING) | (DIO_MODE_DISABLE << DIO_2_MAPPING) | (DIO_MODE_2 << DIO_3_MAPPING) | (DIO_MODE_DISABLE << DIO_4_MAPPING) | (DIO_MODE_DISABLE << DIO_5_MAPPING)) != 0) // Ã�â€™Ã�ÂºÃ�Â»Ã‘Å½Ã‘â€¡Ã�ÂµÃ�Â½Ã�Â¸Ã�Âµ DIO0, DIO1 Ã�Â¸ DIO3
+        return -1;
+
+    if (sx127x_clear_irq_flags(dev, FlagPayloadCrcError | FlagRxDone | FlagRxTimeout) != 0) // Ã�ï¿½Ã�Â° Ã�Â²Ã‘ï¿½Ã‘ï¿½Ã�ÂºÃ�Â¸Ã�Â¹ Ã‘ï¿½Ã�Â»Ã‘Æ’Ã‘â€¡Ã�Â°Ã�Â¹ Ã�Â¾Ã‘â€¡Ã�Â¸Ã‘ï¿½Ã‘â€šÃ‘â‚¬Ã�Â° Ã�Â¿Ã‘â‚¬Ã�ÂµÃ‘â‚¬Ã‘â€¹Ã�Â²Ã�Â°Ã�Â½Ã�Â¸Ã�Â¹
+        return -1;
+
+    if (sx127x_set_irq_flags_mask(dev, FlagPayloadCrcError | FlagRxDone | FlagRxTimeout) != 0) // Ã�â€™Ã�ÂºÃ�Â»Ã‘Å½Ã‘â€¡Ã�ÂµÃ�Â½Ã�Â¸Ã�Âµ Ã�Â¿Ã‘â‚¬Ã�ÂµÃ‘â‚¬Ã‘â€¹Ã�Â²Ã�Â°Ã�Â½Ã�Â¸Ã‘ï¿½ Ã�Â¿Ã�Â¾ Ã�Â¾Ã�ÂºÃ�Â¾Ã�Â½Ã‘â€¡Ã�Â°Ã�Â½Ã�Â¸Ã�Â¸ Ã�Â¾Ã‘â€šÃ�Â¿Ã‘â‚¬Ã�Â°Ã�Â²Ã�ÂºÃ�Â¸
+        return -1;
+
+    if (sx127x_set_standby(dev) != 0) // FIFO Ã�Â½Ã�Âµ Ã�Â´Ã�Â¾Ã‘ï¿½Ã‘â€šÃ‘Æ’Ã�Â¿Ã�ÂµÃ�Â½ Ã�Â² Ã‘â‚¬Ã�ÂµÃ�Â¶Ã�Â¸Ã�Â¼Ã�Âµ SLEEP
+        return -1;
+
+    if (sx127x_set_fifo_rx_pointer(dev, 1) != 0)
+        return -1;
+
+    if (sx127x_set_rx_single(dev) != 0)
+        return -1;
+
+    return 0;
+}
+
+uint8_t sx127x_receive_continuous(sx127x_dev_t* dev, uint8_t* buffer, uint8_t* size)
+{
+    if (dev->settings.mode != MODE_RXCONTINUOUS) {
+
+        if (sx127x_set_dio_config(dev, (DIO_MODE_DISABLE << DIO_0_MAPPING) | (DIO_MODE_DISABLE << DIO_1_MAPPING) | (DIO_MODE_DISABLE << DIO_2_MAPPING) | (DIO_MODE_DISABLE << DIO_3_MAPPING) | (DIO_MODE_DISABLE << DIO_4_MAPPING) | (DIO_MODE_DISABLE << DIO_5_MAPPING)) != 0) // Ã�Å¾Ã‘â€šÃ�ÂºÃ�Â»Ã‘Å½Ã‘â€¡Ã�ÂµÃ�Â½Ã�Â¸Ã�Âµ DIO
+
+            if (sx127x_clear_irq_flags(dev, FlagPayloadCrcError | FlagRxDone | FlagRxTimeout) != 0) // Ã�ï¿½Ã�Â° Ã�Â²Ã‘ï¿½Ã‘ï¿½Ã�ÂºÃ�Â¸Ã�Â¹ Ã‘ï¿½Ã�Â»Ã‘Æ’Ã‘â€¡Ã�Â°Ã�Â¹ Ã�Â¾Ã‘â€¡Ã�Â¸Ã‘ï¿½Ã‘â€šÃ‘â‚¬Ã�Â° Ã�Â¿Ã‘â‚¬Ã�ÂµÃ‘â‚¬Ã‘â€¹Ã�Â²Ã�Â°Ã�Â½Ã�Â¸Ã�Â¹
+                return -1;
+
+        if (sx127x_set_irq_flags_mask(dev, FlagPayloadCrcError | FlagRxDone | FlagRxTimeout) != 0) // Ã�â€™Ã�ÂºÃ�Â»Ã‘Å½Ã‘â€¡Ã�ÂµÃ�Â½Ã�Â¸Ã�Âµ Ã�Â¿Ã‘â‚¬Ã�ÂµÃ‘â‚¬Ã‘â€¹Ã�Â²Ã�Â°Ã�Â½Ã�Â¸Ã‘ï¿½ Ã�Â¿Ã�Â¾ Ã�Â¾Ã�ÂºÃ�Â¾Ã�Â½Ã‘â€¡Ã�Â°Ã�Â½Ã�Â¸Ã�Â¸ Ã�Â¾Ã‘â€šÃ�Â¿Ã‘â‚¬Ã�Â°Ã�Â²Ã�ÂºÃ�Â¸
+            return -1;
+
+        if (sx127x_set_standby(dev) != 0) // FIFO Ã�Â½Ã�Âµ Ã�Â´Ã�Â¾Ã‘ï¿½Ã‘â€šÃ‘Æ’Ã�Â¿Ã�ÂµÃ�Â½ Ã�Â² Ã‘â‚¬Ã�ÂµÃ�Â¶Ã�Â¸Ã�Â¼Ã�Âµ SLEEP
+            return -1;
+
+        if (sx127x_set_fifo_rx_pointer(dev, 0) != 0)
+            return -1;
+
+        if (sx127x_set_rx_continuos(dev) != 0)
+            return -1;
+    }
+
+    while (1) {
+        uint8_t irq = sx127x_get_irq_flags(dev);
+
+        if (irq & FlagRxDone)
+        {
+            sx127x_clear_irq_flags(dev, FlagRxDone);
+
+
+            if (!sx127x_get_crc_valid(dev)) {
+                if (sx127x_clear_irq_flags(dev, FlagPayloadCrcError) != 0)
+                    return -1;
+
+                return 1;
             }
-        }
-        else
-        {
-        #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-            sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Invalid CR value!");
-            sys_log_new_line();
-        #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-        }
-    }
-    else
-    {
-    #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-        sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Invalid BW value!");
-        sys_log_new_line();
-    #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-    }
 
-    return err;
-}
+            *size = sx127x_get_last_packet_size(dev);
+            if (sx127x_read_fifo(dev, buffer, *size) != 0)
+                return -1;
 
-int sx127x_set_preamble_len(uint16_t len)
-{
-    int err = 0;
+            if (sx127x_clear_irq_flags(dev, FlagRxDone) != 0)
+                return -1;
 
-    /* Preamble length is 6 to 65535 */
-    if (len < 6)
-    {
-        err = -1;
-    }
-    else
-    {
-        if ((sx127x_write_reg(SX127X_REG_PREAMBLE_MSB, len >> 8) != 0) ||
-            (sx127x_write_reg(SX127X_REG_PREAMBLE_LSB, len & 0xFFU) != 0))
-        {
-        #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-            sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Error writing to Preamble register!");
-            sys_log_new_line();
-        #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-            err = -1;
+            return 0;
+        } else if (irq & FlagRxTimeout) {
+            if (sx127x_clear_irq_flags(dev, FlagRxTimeout) != 0)
+                return -1;
+
+            return 2;
         }
     }
-
-    return err;
 }
 
-int sx127x_set_header_mode(uint8_t mode)
+uint8_t sx127x_receive_continuous_it(sx127x_dev_t* dev)
 {
-    int err = -1;
+    if (sx127x_set_dio_config(dev, (DIO_MODE_0 << DIO_0_MAPPING) | (DIO_MODE_0 << DIO_1_MAPPING) | (DIO_MODE_DISABLE << DIO_2_MAPPING) | (DIO_MODE_2 << DIO_3_MAPPING) | (DIO_MODE_DISABLE << DIO_4_MAPPING) | (DIO_MODE_DISABLE << DIO_5_MAPPING)) != 0) // Ã�â€™Ã�ÂºÃ�Â»Ã‘Å½Ã‘â€¡Ã�ÂµÃ�Â½Ã�Â¸Ã�Âµ DIO0, DIO1 Ã�Â¸ DIO3
+        return -1;
 
-    if(header_mode <= 0x01U)
-    {
-        header_mode = mode;
+    if (sx127x_clear_irq_flags(dev, FlagPayloadCrcError | FlagRxDone | FlagRxTimeout) != 0)
+        return -1;
 
-        uint8_t temp = UINT8_MAX;
+    if (sx127x_set_irq_flags_mask(dev, FlagPayloadCrcError | FlagRxDone | FlagRxTimeout) != 0)
+        return -1;
 
-        /* Avoid overload the other setting */
-        if (sx127x_read_reg(SX127X_REG_MODEM_CONFIG_1, &temp) == 0)
-        {
-            temp = temp & 0xFEU;
+    if (sx127x_set_standby(dev) != 0)
+        return -1;
 
-            if (sx127x_write_reg(SX127X_REG_MODEM_CONFIG_1, temp | mode) == 0)
-            {
-                err = 0;
-            }
-            else
-            {
-            #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-                sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Error writing to MODEM_CONFIG_1 register!");
-                sys_log_new_line();
-            #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-            }
-        }
-        else
-        {
-        #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-            sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Error reading the MODEM_CONFIG_1 register!");
-            sys_log_new_line();
-        #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-        }
-    }
+    if (sx127x_set_fifo_rx_pointer(dev, 0) != 0)
+        return -1;
 
-    return err;
+    if (sx127x_set_rx_continuos(dev) != 0)
+        return -1;
+
+    return 0;
 }
-
-int sx127x_set_payload_len(uint8_t len)
-{
-    payload_length = len;
-
-    return sx127x_write_reg(SX127X_REG_PAYLOAD_LENGTH, len);
-}
-
-int sx127x_set_tx_power(uint8_t pwr)
-{
-    int err = -1;
-
-    if (pwr <= 0x0FU)
-    {
-        if (sx127x_write_reg(SX127X_REG_PA_CONFIG, SX127X_PA_SELECT_PA_BOOST | 0x70U | pwr) == 0)
-        {
-            err = 0;
-        }
-        else
-        {
-        #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-            sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Error writing to register PA_CONFIG!");
-            sys_log_new_line();
-        #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-        }
-    }
-    else
-    {
-    #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-        sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Invalid power value!");
-        sys_log_new_line();
-    #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-    }
-
-    return err;
-}
-
-int sx127x_set_rx_timeout(uint16_t symb_timeout)
-{
-    int err = -1;
-
-    /* rxtimeout = symb_timeout*(2^SF*BW) */
-	if ((symb_timeout != 0) && (symb_timeout <= 0x3FFU))
-    {
-        uint8_t temp = UINT8_MAX;
-
-        if (sx127x_read_reg(SX127X_REG_MODEM_CONFIG_2, &temp) != 0)
-        {
-        #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-            sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Error reading the register MODEM_CONFIG_2!");
-            sys_log_new_line();
-        #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-        }
-
-        temp = temp & 0xFCU;
-
-        if ((sx127x_write_reg(SX127X_REG_MODEM_CONFIG_2, temp | (symb_timeout >> 8 & 0x03U)) != 0) ||
-            (sx127x_write_reg(SX127X_REG_SYMB_TIMEOUT_LSB, symb_timeout & 0xFFU) != 0))
-        {
-        #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-            sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Error writing to registers MODEM_CONFIG_2 and SYMB_TIMEOUT_LSB!");
-            sys_log_new_line();
-        #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-        }
-
-        err = 0;
-    }
-    else
-    {
-    #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-        sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Invalid symb_timeout value!");
-        sys_log_new_line();
-    #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-    }
-
-    return err;
-}
-
-int sx127x_read_rssi(uint8_t mode, uint8_t rssi_val)
-{
-    int err = -1;
-
-    if (!mode)
-    {
-        if (sx127x_read_reg(SX127X_REG_RSSI_VALUE, &rssi_val) == 0)
-        {
-            err = 0;
-        }
-        else
-        {
-        #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-            sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Error reading the register RSSI_VALUE!");
-            sys_log_new_line();
-        #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-        }
-    }
-    else
-    {
-        if (sx127x_read_reg(SX127X_REG_PKT_RSSI_VALUE, &rssi_val) == 0)
-        {
-            err = 0;
-        }
-        else
-        {
-        #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-            sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Error reading the register PKT_RSSI_VALUE!");
-            sys_log_new_line();
-        #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-        }
-    }
-
-    return err;
-}
-
-int sx127x_power_on_reset(void)
-{
-    int err = sx127X_gpio_write_reset(false);
-
-    sx127x_delay_ms(10);
-
-    err = sx127X_gpio_write_reset(true);
-
-    sx127x_delay_ms(20);
-
-    return err;
-}
-
-int sx127x_config(void)
-{
-    /* Sleep mode */
-    sx127x_write_reg(SX127X_REG_OP_MODE, SX127X_OP_MODE_SLEEP | SX127X_FREQUENCY_BAND);
-    sx127x_delay_ms(5);
-
-    /* External Crystal */
-    sx127x_write_reg(SX127X_REG_TCXO, SX127X_TCXO_EXT_CRYSTAL | SX127X_TCXO_REGTCXO_RESERVED);
-
-    /* LoRa Mode */
-    sx127x_write_reg(SX127X_REG_OP_MODE, SX127X_LONG_RANGE_MODE_LORA | SX127X_FREQUENCY_BAND);
-
-    /* Setting Frequency */
-    sx127x_set_frequency(433500000);
-
-    /* Maximum Power, 20 dB */
-    sx127x_set_tx_power(0x0f);
-
-    /* Close OCP */
-    sx127x_write_reg(SX127X_REG_OCP, SX127X_OCPON_OFF| 0x0B);
-    //sx127x_write_reg(adr, val)
-
-    /* Enable LNA */
-    sx127x_write_reg(SX127X_REG_LNA, SX127X_LNA_GAIN_G1 | SX127X_LNA_BOOSTHF_1);
-
-    /* RF Params */
-    /*BW = 62.5 Hz, spreading factor = 9, coding rate = 4/5, explicit header mode */
-    header_mode = SX127X_EXPLICIT_HEADER_MODE;
-    sx127x_set_header_mode(header_mode);
-    sx127x_set_rf_param(SX127X_BW_62P5K, SX127X_CODING_RATE_1P25, SX127X_SPREADING_FACTOR_9, SX127X_PAYLOAD_CRC_ON);
-
-    /* LNA */
-    sx127x_write_reg(SX127X_REG_MODEM_CONFIG_3, SX127X_LOWDATARATEOPTIMIZE_DSBLD);
-
-    /* Maximum RX time out */
-    sx127x_set_rx_timeout(0x3ff);
-
-    // Preamble 12+ 4.25 bytes
-    sx127x_set_preamble_len(12);
-
-    /* 20 dBm on PA_BOOST pin */
-    sx127x_write_reg(SX127X_REG_PA_DAC, SX127X_REGPADAC_RESERVED | SX127X_20DB_OUTPUT_ON);
-
-    /* No hopping */
-    sx127x_write_reg(SX127X_REG_HOP_PERIOD, 0x00);
-
-    /*DIO5 = ModeReady, DIO4=CadDetected */
-    sx127x_write_reg(SX127X_REG_DIO_MAPPING_2, SX127X_DIO4_CADDETECTED | SX127X_DIO5_MODEREADY);
-
-    /* Standby mode */
-    sx127x_write_reg(SX127X_REG_OP_MODE, SX127X_OP_MODE_STBY | SX127X_FREQUENCY_BAND);
-
-    /* Set Payload Length 10 bytes in explicit mode */
-    return sx127x_set_payload_len(10);
-}
-
-int sx127x_set_ant_switch(sx127x_mode_t mode)
-{
-    return -1;
-}
-
-int sx127x_set_fifo_addr_ptr(uint8_t adr)
-{
-    int err = 0;
-
-    uint8_t adr_val = UINT8_MAX;
-
-    if ((sx127x_read_reg(adr, &adr_val) != 0) ||
-        (sx127x_write_reg(SX127X_REG_FIFO_ADDR_PTR, adr_val) != 0))
-    {
-    #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-        sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Error configuring the FIFO address pointer!");
-        sys_log_new_line();
-    #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-        err = -1;
-    }
-
-    return err;
-}
-
-int sx127x_enter_rx_mode(void)
-{
-    int err = 0;
-
-    if ((sx127x_set_ant_switch(SX127X_MODE_RX) != 0) ||
-        (sx127x_write_reg(SX127X_REG_OP_MODE, SX127X_OP_MODE_RX_CONTINUOUS | SX127X_FREQUENCY_BAND) != 0))
-    {
-    #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-        sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Error entering in RX mode!");
-        sys_log_new_line();
-    #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-        err = -1;
-    }
-
-    return err;
-}
-
-int sx127x_enter_tx_mode(void)
-{
-    int err = 0;
-
-    if ((sx127x_set_ant_switch(SX127X_MODE_TX) != 0) ||
-        (sx127x_write_reg(SX127X_REG_OP_MODE, SX127X_OP_MODE_TX | SX127X_FREQUENCY_BAND) != 0))
-    {
-    #if defined(CONFIG_DRIVERS_DEBUG_ENABLED) && (CONFIG_DRIVERS_DEBUG_ENABLED == 1)
-        sys_log_print_event_from_module(SYS_LOG_ERROR, SX127X_MODULE_NAME, "Error entering in TX mode!");
-        sys_log_new_line();
-    #endif /* CONFIG_DRIVERS_DEBUG_ENABLED */
-        err = -1;
-    }
-
-    return err;
-}
-
-int sx127x_write_fifo(uint8_t *data, uint8_t len)
-{
-    return -1;
-}
-
-int sx127x_read_fifo(uint8_t *data, uint8_t *len)
-{
-    return -1;
-}
-
-int sx127x_set_tx_interrupt(void)
-{
-    return -1;
-}
-
-int sx127x_set_rx_interrupt(void)
-{
-    return -1;
-}
-
-int sx127x_read_reg(uint8_t adr, uint8_t *val)
-{
-    int err = -1;
-
-    uint8_t wbuf[2] = {0};
-    uint8_t rbuf[2] = {0};
-
-    if (sx127x_spi_transfer(wbuf, rbuf, 2) == 0)
-    {
-        *val = rbuf[1];
-
-        err = 0;
-    }
-
-    return err;
-}
-
-int sx127x_write_reg(uint8_t adr, uint8_t val)
-{
-    uint8_t wbuf[2] = {0};
-
-    wbuf[0] = adr | SX127X_SPI_WNR;
-    wbuf[1] = val;
-
-    return sx127x_spi_write(wbuf, 2);
-}
-
-int sx127x_burst_read(uint8_t adr, uint8_t *ptr, uint8_t len)
-{
-    int err = -1;
-
-    if (len <= 1)
-    {
-        err = sx127x_read_reg(adr, ptr);
-    }
-    else
-    {
-        uint8_t wbuf[32] = {0};
-
-        err = sx127x_spi_write(adr, 1);
-
-        uint8_t i = 0;
-        for(i = 0; i < len; i++)
-        {
-            err = sx127x_spi_transfer(wbuf, ptr, len);
-        }
-    }
-
-    return err;
-}
-
-int sx127x_burst_write(uint8_t adr, uint8_t *ptr, uint8_t len)
-{
-    int err = -1;
-
-    if (len <= 1)
-    {
-        err = sx127x_write_reg(adr, ptr[0]);
-    }
-    else
-    {
-        uint8_t wbuf[32] = {0};
-
-        wbuf[0] = adr | SX127X_SPI_WNR;
-
-        memcpy(&wbuf[1], ptr, len);
-
-        err = sx127x_spi_write(wbuf, 1U + len);
-    }
-
-    return err;
-}
-
-/** \} End of sx127x group */

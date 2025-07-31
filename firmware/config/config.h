@@ -38,7 +38,7 @@
 #define CONFIG_H_
 
 /* Targets the radio module, it can be '0' or '1'*/
-#define RADIO_MODULE                                   -1
+#define RADIO_MODULE                                   0
 
 /* Tasks */
 #define CONFIG_TASK_STARTUP_ENABLED                     1
@@ -81,8 +81,8 @@
 #define SI446X_XO_TUNE_REG_VALUE                        97
 
 /* Drivers */
-#define ISIS_ANTENNA_ENABLED                            1
-#define CONFIG_DRV_ISIS_ANTENNA_ENABLED                 1
+#define ISIS_ANTENNA_ENABLED                            0
+#define CONFIG_DRV_ISIS_ANTENNA_ENABLED                 0
 
 /* Antenna */
 #define CONFIG_ANTENNA_INDEP_DEPLOY_BURN_TIME_SEC       10U
