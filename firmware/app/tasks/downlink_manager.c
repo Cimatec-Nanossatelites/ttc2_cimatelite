@@ -81,6 +81,16 @@ void vTaskDownlinkManager(void)
 
             downlink_pop_packet(tx_pkt, &tx_pkt_len);
 
+            sys_log_print_event_from_module(SYS_LOG_INFO, TASK_DOWNLINK_MANAGER_NAME, "Pacote nao codificado: ");
+            sys_log_new_line();
+            sys_log_print_event_from_module(SYS_LOG_INFO, TASK_DOWNLINK_MANAGER_NAME, "Bytes: ");
+            sys_log_print_uint(tx_pkt_len);
+            sys_log_new_line();
+            sys_log_print_event_from_module(SYS_LOG_INFO, TASK_DOWNLINK_MANAGER_NAME, "Pacote: ");
+            sys_log_new_line();
+            sys_log_dump_hex(tx_pkt, tx_pkt_len);
+            sys_log_new_line();
+
             if (ngham_encode(tx_pkt, tx_pkt_len, 0U, ngham_pkt, &ngham_pkt_len) == 0)
             {
                 sys_log_print_event_from_module(SYS_LOG_INFO, TASK_DOWNLINK_MANAGER_NAME, "Encoding packet...");
