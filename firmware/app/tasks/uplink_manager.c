@@ -138,7 +138,7 @@ void vTaskUplinkManager(void)
                     sys_log_print_uint(ngham_decoded_packet_len);
                     sys_log_new_line();
 
-                    if (ngham_decoded_packet[0] == 0x55)
+                    if (ngham_decoded_packet[0] == PKT_ID_UPLINK_PCD_TRANSMIT_PAYLOAD)
                     {
                         sys_log_print_event_from_module(
                                 SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME, "PCD Packet Received");
