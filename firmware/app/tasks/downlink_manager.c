@@ -42,17 +42,31 @@
 #include "downlink_manager.h"
 #include "startup.h"
 
+#define PKT_ID_DOWNLINK_PAYLOAD_DATA  0x12
+
+typedef struct
+{
+    uint8_t ID;
+    uint8_t humidity;
+    uint8_t precipitation;
+    uint8_t temperature;
+    uint8_t wind_direction;
+    uint8_t wind_speed;
+} PCD_data_T;
+
 xTaskHandle xTaskDownlinkManagerHandle;
 
 void vTaskDownlinkManager(void)
 {
     /* Wait startup task to finish */
-    xEventGroupWaitBits(task_startup_status, TASK_STARTUP_DONE, pdFALSE, pdTRUE, pdMS_TO_TICKS(TASK_DOWNLINK_MANAGER_INIT_TIMEOUT_MS));
+    xEventGroupWaitBits(task_startup_status, TASK_STARTUP_DONE, pdFALSE, pdTRUE,
+                        pdMS_TO_TICKS(TASK_DOWNLINK_MANAGER_INIT_TIMEOUT_MS));
 
     /* Delay before the first cycle */
     vTaskDelay(pdMS_TO_TICKS(TASK_DOWNLINK_MANAGER_INITIAL_DELAY_MS));
 
-    sys_log_print_event_from_module(SYS_LOG_INFO, TASK_DOWNLINK_MANAGER_NAME, "Initializing the Downlink Manager...");
+    sys_log_print_event_from_module(SYS_LOG_INFO, TASK_DOWNLINK_MANAGER_NAME,
+                                    "Initializing the Downlink Manager...");
     sys_log_new_line();
 
     /* Start TTC in TX mode */
@@ -64,58 +78,84 @@ void vTaskDownlinkManager(void)
     ttc_data_buf.down_buf.position_to_read = 0;
     ttc_data_buf.down_buf.position_to_write = 0;
 
-    uint8_t tx_pkt[220] = {0};
+    uint8_t tx_pkt[220] = { 0 };
     uint16_t tx_pkt_len = UINT8_MAX;
 
-    uint8_t ngham_pkt[300] = {0};
+    uint8_t ngham_pkt[300] = { 0 };
     uint16_t ngham_pkt_len = UINT16_MAX;
 
-    while(1)
+    while (1)
     {
         TickType_t last_cycle = xTaskGetTickCount();
 
-        if ((ttc_data_buf.radio.tx_fifo_counter > 0) && (ttc_data_buf.radio.tx_enable == 1U))
+        if ((ttc_data_buf.radio.tx_fifo_counter > 0)
+                && (ttc_data_buf.radio.tx_enable == 1U))
         {
-            sys_log_print_event_from_module(SYS_LOG_INFO, TASK_DOWNLINK_MANAGER_NAME, "Sending packet:");
+            sys_log_print_event_from_module(SYS_LOG_INFO,
+            TASK_DOWNLINK_MANAGER_NAME,
+                                            "Sending packet:");
             sys_log_new_line();
-
             downlink_pop_packet(tx_pkt, &tx_pkt_len);
 
-            sys_log_print_event_from_module(SYS_LOG_INFO, TASK_DOWNLINK_MANAGER_NAME, "Pacote nao codificado: ");
-            sys_log_new_line();
-            sys_log_print_event_from_module(SYS_LOG_INFO, TASK_DOWNLINK_MANAGER_NAME, "Bytes: ");
-            sys_log_print_uint(tx_pkt_len);
-            sys_log_new_line();
-            sys_log_print_event_from_module(SYS_LOG_INFO, TASK_DOWNLINK_MANAGER_NAME, "Pacote: ");
-            sys_log_new_line();
-            sys_log_dump_hex(tx_pkt, tx_pkt_len);
-            sys_log_new_line();
-
-            if (ngham_encode(tx_pkt, tx_pkt_len, 0U, ngham_pkt, &ngham_pkt_len) == 0)
+            if (tx_pkt[0] == PKT_ID_DOWNLINK_PAYLOAD_DATA)
             {
-                sys_log_print_event_from_module(SYS_LOG_INFO, TASK_DOWNLINK_MANAGER_NAME, "Encoding packet...");
+                PCD_data_T payload = { 0 };
+
+                memcpy(&payload, &tx_pkt[12], sizeof(PCD_data_T));
+
+                sys_log_print_event_from_module(SYS_LOG_INFO,
+                TASK_DOWNLINK_MANAGER_NAME,
+                                                "Payload Data Downlink ");
+                sys_log_new_line();
+
+                sys_log_print_event_from_module(SYS_LOG_INFO,
+                TASK_DOWNLINK_MANAGER_NAME,
+                                                "ID: ");
+                sys_log_print_uint(payload.ID);
+                sys_log_new_line();
+
+                sys_log_print_event_from_module(SYS_LOG_INFO,
+                TASK_DOWNLINK_MANAGER_NAME,
+                                                "Temperature: ");
+                sys_log_print_uint(payload.temperature);
+                sys_log_new_line();
+            }
+
+            if (ngham_encode(tx_pkt, tx_pkt_len, 0U, ngham_pkt, &ngham_pkt_len)
+                    == 0)
+            {
+                sys_log_print_event_from_module(SYS_LOG_INFO,
+                TASK_DOWNLINK_MANAGER_NAME,
+                                                "Encoding packet...");
                 sys_log_new_line();
 
                 if (radio_send(&ngham_pkt[8], ngham_pkt_len) == 0)
                 {
-                    sys_log_print_event_from_module(SYS_LOG_INFO, TASK_DOWNLINK_MANAGER_NAME, "Packet successfully transmitted");
+                    sys_log_print_event_from_module(
+                            SYS_LOG_INFO, TASK_DOWNLINK_MANAGER_NAME,
+                            "Packet successfully transmitted");
                     sys_log_new_line();/* 8 = Removing preamble and sync word */
                 }
                 else
                 {
-                    sys_log_print_event_from_module(SYS_LOG_ERROR, TASK_DOWNLINK_MANAGER_NAME, "Failed to transmit the packet");
+                    sys_log_print_event_from_module(
+                            SYS_LOG_ERROR, TASK_DOWNLINK_MANAGER_NAME,
+                            "Failed to transmit the packet");
                     sys_log_new_line();
 
                 }
             }
             else
             {
-                sys_log_print_event_from_module(SYS_LOG_ERROR, TASK_DOWNLINK_MANAGER_NAME, "Error encoding a NGHam packet");
+                sys_log_print_event_from_module(
+                        SYS_LOG_ERROR, TASK_DOWNLINK_MANAGER_NAME,
+                        "Error encoding a NGHam packet");
                 sys_log_new_line();
             }
         }
 
-        vTaskDelayUntil(&last_cycle, pdMS_TO_TICKS(TASK_DOWNLINK_MANAGER_PERIOD_MS));
+        vTaskDelayUntil(&last_cycle,
+                        pdMS_TO_TICKS(TASK_DOWNLINK_MANAGER_PERIOD_MS));
     }
 }
 
