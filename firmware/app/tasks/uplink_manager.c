@@ -43,17 +43,31 @@
 
 #include <drivers/si446x/si446x.h>
 
+#define PKT_ID_UPLINK_PCD_TRANSMIT_PAYLOAD 0x55
+
 xTaskHandle xTaskUplinkManagerHandle;
+
+typedef struct
+{
+    uint8_t ID;
+    uint8_t humidity;
+    uint8_t precipitation;
+    uint8_t temperature;
+    uint8_t wind_direction;
+    uint8_t wind_speed;
+} PCD_data_T;
 
 void vTaskUplinkManager(void)
 {
     /* Wait startup task to finish */
-    xEventGroupWaitBits(task_startup_status, TASK_STARTUP_DONE, pdFALSE, pdTRUE, pdMS_TO_TICKS(TASK_UPLINK_MANAGER_INIT_TIMEOUT_MS));
+    xEventGroupWaitBits(task_startup_status, TASK_STARTUP_DONE, pdFALSE, pdTRUE,
+                        pdMS_TO_TICKS(TASK_UPLINK_MANAGER_INIT_TIMEOUT_MS));
 
     /* Delay before the first cycle */
     vTaskDelay(pdMS_TO_TICKS(TASK_UPLINK_MANAGER_INITIAL_DELAY_MS));
 
-    sys_log_print_event_from_module(SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME, "Initializing the Uplink Manager...");
+    sys_log_print_event_from_module(SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME,
+                                    "Initializing the Uplink Manager...");
     sys_log_new_line();
 
     ttc_data_buf.radio.rx_fifo_counter = 0U;
@@ -64,57 +78,122 @@ void vTaskUplinkManager(void)
     ttc_data_buf.up_buf.position_to_read = 0U;
     ttc_data_buf.up_buf.position_to_write = 0U;
 
-    uint8_t rx_packet[230] = {0};
-    uint8_t ngham_decoded_packet[220] = {0};
+    uint8_t rx_packet[230] = { 0 };
+    uint8_t ngham_decoded_packet[220] = { 0 };
     uint16_t ngham_decoded_packet_len = 0;
 
     ttc_data_buf.n_conseq_failed_packets = 0U;
 
-    while(1)
+    while (1)
     {
         TickType_t last_cycle = xTaskGetTickCount();
 
         if (radio_available() == 0U)
         {
-            sys_log_print_event_from_module(SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME, "Receiving a new package:");
+            sys_log_print_event_from_module(SYS_LOG_INFO,
+            TASK_UPLINK_MANAGER_NAME,
+                                            "Receiving a new package:");
             sys_log_new_line();
 
-            if(radio_recv(rx_packet, 128U, 100U) > 0)
+            if (radio_recv(rx_packet, 128U, 100U) > 0)
             {
-                if (radio_get_rssi(&ttc_data_buf.radio.rssi) == 0)
-                {
-                    sys_log_print_event_from_module(SYS_LOG_INFO,  TASK_UPLINK_MANAGER_NAME, "Latched RSSI is ");
-                    sys_log_print_uint((uint32_t)ttc_data_buf.radio.rssi);
-                    sys_log_print_msg(" dBm");
-                    sys_log_new_line();
-                }
-                else
-                {
-                    sys_log_print_event_from_module(SYS_LOG_ERROR,  TASK_UPLINK_MANAGER_NAME, "Failed to obtain the radio RSSI");
-                    sys_log_new_line();
-                }
+//                if (radio_get_rssi(&ttc_data_buf.radio.rssi) == 0)
+//                {
+//                    sys_log_print_event_from_module(SYS_LOG_INFO,  TASK_UPLINK_MANAGER_NAME, "Latched RSSI is ");
+//                    sys_log_print_uint((uint32_t)ttc_data_buf.radio.rssi);
+//                    sys_log_print_msg(" dBm");
+//                    sys_log_new_line();
+//                }
+//                else
+//                {
+//                    sys_log_print_event_from_module(SYS_LOG_ERROR,  TASK_UPLINK_MANAGER_NAME, "Failed to obtain the radio RSSI");
+//                    sys_log_new_line();
+//                }
 
-                sys_log_print_event_from_module(SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME, "Decoding packet...");
+                sys_log_print_event_from_module(SYS_LOG_INFO,
+                TASK_UPLINK_MANAGER_NAME,
+                                                "Decoding packet...");
                 sys_log_new_line();
 
-                if(ngham_decode(rx_packet, 220, ngham_decoded_packet, &ngham_decoded_packet_len) == 0)
+                if (ngham_decode(rx_packet, 220, ngham_decoded_packet,
+                                 &ngham_decoded_packet_len) == 0)
                 {
 
-                    uplink_add_packet(ngham_decoded_packet, ngham_decoded_packet_len);
+                    uplink_add_packet(ngham_decoded_packet,
+                                      ngham_decoded_packet_len);
+                    PCD_data_T payload = { 0 };
+
+                    memcpy(&payload, &ngham_decoded_packet[21],
+                           sizeof(PCD_data_T));
                     ttc_data_buf.n_conseq_failed_packets = 0U;
 
-                    sys_log_print_event_from_module(SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME, "Packet successfully received.");
+                    sys_log_print_event_from_module(
+                            SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME,
+                            "Packet successfully received.");
                     sys_log_new_line();
+
+                    sys_log_print_event_from_module(SYS_LOG_INFO,
+                    TASK_UPLINK_MANAGER_NAME,
+                                                    "Bytes recebidos: ");
+                    sys_log_print_uint(ngham_decoded_packet_len);
+                    sys_log_new_line();
+
+                    if (ngham_decoded_packet[0] == 0x55)
+                    {
+                        sys_log_print_event_from_module(
+                                SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME, "PCD Packet Received");
+                        sys_log_new_line();
+
+                        sys_log_print_event_from_module(
+                                SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME, "ID: ");
+                        sys_log_print_uint(payload.ID);
+                        sys_log_new_line();
+
+                        sys_log_print_event_from_module(
+                                SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME,
+                                "Humidity: ");
+                        sys_log_print_uint(payload.humidity);
+                        sys_log_new_line();
+
+                        sys_log_print_event_from_module(
+                                SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME,
+                                "Precipitation: ");
+                        sys_log_print_uint(payload.precipitation);
+                        sys_log_new_line();
+
+                        sys_log_print_event_from_module(
+                                SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME,
+                                "Temperature: ");
+                        sys_log_print_uint(payload.temperature);
+                        sys_log_new_line();
+
+                        sys_log_print_event_from_module(
+                                SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME,
+                                "Wind Direction: ");
+                        sys_log_print_byte(payload.wind_direction);
+                        sys_log_new_line();
+
+                        sys_log_print_event_from_module(
+                                SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME,
+                                "Wind Speed: ");
+                        sys_log_print_uint(payload.wind_speed);
+                        sys_log_new_line();
+                    }
                 }
                 else
                 {
 //                    (void)radio_reset(); // TODO: radio_reset nao existia no firmware antigo, deve ser implementado ?
                     ttc_data_buf.n_conseq_failed_packets++;
 
-                    sys_log_print_event_from_module(SYS_LOG_ERROR, TASK_UPLINK_MANAGER_NAME, "Failed to decode a new packet.");
+                    sys_log_print_event_from_module(
+                            SYS_LOG_ERROR, TASK_UPLINK_MANAGER_NAME,
+                            "Failed to decode a new packet.");
                     sys_log_new_line();
-                    sys_log_print_event_from_module(SYS_LOG_ERROR, TASK_UPLINK_MANAGER_NAME, "The number of consecutive failed packages is: ");
-                    sys_log_print_uint((uint32_t)ttc_data_buf.n_conseq_failed_packets);
+                    sys_log_print_event_from_module(
+                            SYS_LOG_ERROR, TASK_UPLINK_MANAGER_NAME,
+                            "The number of consecutive failed packages is: ");
+                    sys_log_print_uint(
+                            (uint32_t) ttc_data_buf.n_conseq_failed_packets);
                     sys_log_new_line();
                 }
             }
@@ -123,15 +202,21 @@ void vTaskUplinkManager(void)
 //                (void)radio_reset();
                 ttc_data_buf.n_conseq_failed_packets++;
 
-                sys_log_print_event_from_module(SYS_LOG_ERROR, TASK_UPLINK_MANAGER_NAME, "Failed to receive a new packet.");
+                sys_log_print_event_from_module(
+                        SYS_LOG_ERROR, TASK_UPLINK_MANAGER_NAME,
+                        "Failed to receive a new packet.");
                 sys_log_new_line();
-                sys_log_print_event_from_module(SYS_LOG_ERROR, TASK_UPLINK_MANAGER_NAME, "The number of consecutive failed packages is: ");
-                sys_log_print_uint((uint32_t)ttc_data_buf.n_conseq_failed_packets);
+                sys_log_print_event_from_module(
+                        SYS_LOG_ERROR, TASK_UPLINK_MANAGER_NAME,
+                        "The number of consecutive failed packages is: ");
+                sys_log_print_uint(
+                        (uint32_t) ttc_data_buf.n_conseq_failed_packets);
                 sys_log_new_line();
             }
         }
 
-        vTaskDelayUntil(&last_cycle, pdMS_TO_TICKS(TASK_UPLINK_MANAGER_PERIOD_MS));
+        vTaskDelayUntil(&last_cycle,
+                        pdMS_TO_TICKS(TASK_UPLINK_MANAGER_PERIOD_MS));
     }
 }
 
