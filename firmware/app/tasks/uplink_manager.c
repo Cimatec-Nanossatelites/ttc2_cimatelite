@@ -121,8 +121,8 @@ void vTaskUplinkManager(void)
 
                     uplink_add_packet(ngham_decoded_packet,
                                       ngham_decoded_packet_len);
-                    PCD_data_T payload = { 0 };
 
+                    PCD_data_T payload = { 0 };
                     memcpy(&payload, &ngham_decoded_packet[21],
                            sizeof(PCD_data_T));
                     ttc_data_buf.n_conseq_failed_packets = 0U;
@@ -132,11 +132,11 @@ void vTaskUplinkManager(void)
                             "Packet successfully received.");
                     sys_log_new_line();
 
-                    sys_log_print_event_from_module(SYS_LOG_INFO,
-                    TASK_UPLINK_MANAGER_NAME,
-                                                    "Bytes recebidos: ");
-                    sys_log_print_uint(ngham_decoded_packet_len);
-                    sys_log_new_line();
+//                    sys_log_print_event_from_module(SYS_LOG_INFO,
+//                    TASK_UPLINK_MANAGER_NAME,
+//                                                    "Bytes recebidos: ");
+//                    sys_log_print_uint(ngham_decoded_packet_len);
+//                    sys_log_new_line();
 
                     if (ngham_decoded_packet[0] == PKT_ID_UPLINK_PCD_TRANSMIT_PAYLOAD)
                     {
