@@ -128,6 +128,8 @@ void vTaskDownlinkManager(void)
                 TASK_DOWNLINK_MANAGER_NAME,
                                                 "Encoding packet...");
                 sys_log_new_line();
+                sys_log_dump_hex(ngham_pkt, ngham_pkt_len);
+                sys_log_new_line();
 
                 if (radio_send(&ngham_pkt[8], ngham_pkt_len) == 0)
                 {
