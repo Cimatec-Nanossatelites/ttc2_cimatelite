@@ -132,53 +132,53 @@ void vTaskUplinkManager(void)
                             "Packet successfully received.");
                     sys_log_new_line();
 
-//                    sys_log_print_event_from_module(SYS_LOG_INFO,
-//                    TASK_UPLINK_MANAGER_NAME,
-//                                                    "Bytes recebidos: ");
-//                    sys_log_print_uint(ngham_decoded_packet_len);
-//                    sys_log_new_line();
+                    sys_log_print_event_from_module(SYS_LOG_INFO,
+                    TASK_UPLINK_MANAGER_NAME,
+                                                    "Bytes recebidos: ");
+                    sys_log_print_uint(ngham_decoded_packet_len);
+                    sys_log_new_line();
 
-                    if (ngham_decoded_packet[0] == PKT_ID_UPLINK_PCD_TRANSMIT_PAYLOAD)
-                    {
-                        sys_log_print_event_from_module(
-                                SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME, "PCD Packet Received");
-                        sys_log_new_line();
-
-                        sys_log_print_event_from_module(
-                                SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME, "ID: ");
-                        sys_log_print_uint(payload.ID);
-                        sys_log_new_line();
-
-                        sys_log_print_event_from_module(
-                                SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME,
-                                "Humidity: ");
-                        sys_log_print_uint(payload.humidity);
-                        sys_log_new_line();
-
-                        sys_log_print_event_from_module(
-                                SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME,
-                                "Precipitation: ");
-                        sys_log_print_uint(payload.precipitation);
-                        sys_log_new_line();
-
-                        sys_log_print_event_from_module(
-                                SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME,
-                                "Temperature: ");
-                        sys_log_print_uint(payload.temperature);
-                        sys_log_new_line();
-
-                        sys_log_print_event_from_module(
-                                SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME,
-                                "Wind Direction: ");
-                        sys_log_print_byte(payload.wind_direction);
-                        sys_log_new_line();
-
-                        sys_log_print_event_from_module(
-                                SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME,
-                                "Wind Speed: ");
-                        sys_log_print_uint(payload.wind_speed);
-                        sys_log_new_line();
-                    }
+//                    if (ngham_decoded_packet[0] == PKT_ID_UPLINK_PCD_TRANSMIT_PAYLOAD)
+//                    {
+//                        sys_log_print_event_from_module(
+//                                SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME, "PCD Packet Received");
+//                        sys_log_new_line();
+//
+//                        sys_log_print_event_from_module(
+//                                SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME, "ID: ");
+//                        sys_log_print_uint(payload.ID);
+//                        sys_log_new_line();
+//
+//                        sys_log_print_event_from_module(
+//                                SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME,
+//                                "Humidity: ");
+//                        sys_log_print_uint(payload.humidity);
+//                        sys_log_new_line();
+//
+//                        sys_log_print_event_from_module(
+//                                SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME,
+//                                "Precipitation: ");
+//                        sys_log_print_uint(payload.precipitation);
+//                        sys_log_new_line();
+//
+//                        sys_log_print_event_from_module(
+//                                SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME,
+//                                "Temperature: ");
+//                        sys_log_print_uint(payload.temperature);
+//                        sys_log_new_line();
+//
+//                        sys_log_print_event_from_module(
+//                                SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME,
+//                                "Wind Direction: ");
+//                        sys_log_print_byte(payload.wind_direction);
+//                        sys_log_new_line();
+//
+//                        sys_log_print_event_from_module(
+//                                SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME,
+//                                "Wind Speed: ");
+//                        sys_log_print_uint(payload.wind_speed);
+//                        sys_log_new_line();
+//                    }
                 }
                 else
                 {
