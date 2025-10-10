@@ -88,8 +88,8 @@ int obdh_read_request(obdh_request_t *obdh_request)
 
     if ((err != -1) && (crc8_get_val(request, OBDH_TRANSFER_SIZE - 1U) != request[OBDH_TRANSFER_SIZE - 1U]))
     {
-        sys_log_print_event_from_module(SYS_LOG_ERROR, OBDH_MODULE_NAME, "Received invalid CRC!");
-        sys_log_new_line();
+//        sys_log_print_event_from_module(SYS_LOG_ERROR, OBDH_MODULE_NAME, "Received invalid CRC!");
+//        sys_log_new_line();
         err = -1;
         spi_slave_dma_change_transfer_size(OBDH_TRANSFER_SIZE); /* Resets dma */
     }
@@ -103,17 +103,17 @@ int obdh_read_request(obdh_request_t *obdh_request)
             case CMDPR_CMD_READ_PARAM:
                 obdh_request->parameter = request[2];
 
-                sys_log_print_event_from_module(SYS_LOG_INFO, OBDH_MODULE_NAME, "Read command received, parameter:");
-                sys_log_print_hex(obdh_request->parameter);
-                sys_log_new_line();
+//                sys_log_print_event_from_module(SYS_LOG_INFO, OBDH_MODULE_NAME, "Read command received, parameter:");
+//                sys_log_print_hex(obdh_request->parameter);
+//                sys_log_new_line();
 
                 break;
             case CMDPR_CMD_WRITE_PARAM:
                 obdh_request->parameter = request[2];
 
-                sys_log_print_event_from_module(SYS_LOG_INFO, OBDH_MODULE_NAME, "Write command received, parameter:");
-                sys_log_print_hex(obdh_request->parameter);
-                sys_log_new_line();
+//                sys_log_print_event_from_module(SYS_LOG_INFO, OBDH_MODULE_NAME, "Write command received, parameter:");
+//                sys_log_print_hex(obdh_request->parameter);
+//                sys_log_new_line();
 
                 if ((obdh_request->parameter == CMDPR_PARAM_TX_ENABLE) || (obdh_request->parameter == CMDPR_PARAM_RESET_DEVICE))
                 {

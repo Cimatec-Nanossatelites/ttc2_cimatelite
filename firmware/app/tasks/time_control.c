@@ -123,10 +123,10 @@ void vTaskTimeControl(void)
             }
             else
             {
-                sys_log_print_event_from_module(SYS_LOG_INFO, TASK_TIME_CONTROL_NAME, "Saving system time (epoch): ");
-                sys_log_print_uint(sys_tm);
-                sys_log_print_msg(" sec");
-                sys_log_new_line();
+//                sys_log_print_event_from_module(SYS_LOG_INFO, TASK_TIME_CONTROL_NAME, "Saving system time (epoch): ");
+//                sys_log_print_uint(sys_tm);
+//                sys_log_print_msg(" sec");
+//                sys_log_new_line();
             }
         }
 
