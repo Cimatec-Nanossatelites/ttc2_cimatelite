@@ -45,6 +45,8 @@
 #define CMDPR_CMD_TRANSMIT_PACKET            0x03U       /**< Transmit a packet */
 #define CMDPR_CMD_READ_FIRST_PACKET          0x04U       /**< Read first available packet */
 
+#define CMDPR_CMD_TURN_LED_ON              0x20U     /**< Command to turn the led on */
+
 /* CMDPR Parameters */
 #define CMDPR_PARAM_DEVICE_ID                0x00U       /**< Hardware version */
 #define CMDPR_PARAM_HW_VER                   0x01U       /**< Firmware version */

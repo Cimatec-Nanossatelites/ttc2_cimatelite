@@ -42,6 +42,8 @@
 #include <drivers/spi_slave/spi_slave.h>
 #include <hal/dma.h>
 
+#include <devices/leds/leds.h>
+
 #include "obdh_server.h"
 #include "startup.h"
 
@@ -133,7 +135,6 @@ void vTaskObdhServer(void)
                             sys_log_new_line();
 
                             break;
-
                         default:
                             sys_log_print_event_from_module(SYS_LOG_ERROR, TASK_OBDH_SERVER_NAME, "Invalid write parameter.");
 
@@ -156,6 +157,12 @@ void vTaskObdhServer(void)
                         obdh_write_read_bytes(OBDH_TRANSFER_SIZE);
 
                         break;
+
+                    case CMDPR_CMD_TURN_LED_ON:
+                        obdh_response.command = obdh_request.command;
+                        led_set(LED_SYSTEM);
+                        break;
+                    
                     case 0x00:
                         /* Read mode */
                         obdh_write_read_bytes(OBDH_TRANSFER_SIZE);
