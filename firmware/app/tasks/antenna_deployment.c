@@ -40,6 +40,8 @@
 #include <devices/media/media.h>
 #include <drivers/flash/flash.h>
 
+#include <devices/leds/leds.h>
+
 #include <structs/ttc_data.h>
 
 #include <libs/crc/crc.h>
@@ -129,6 +131,8 @@ void vTaskAntennaDeployment(void)
         ttc_data_buf.ant_deploy_count++;
 
         ttc_data_buf.ant_deploy_exec = true;
+
+        led_set(LED_SYSTEM);
 
         (void)save_deployment_state_to_flash(&ttc_data_buf);
     }

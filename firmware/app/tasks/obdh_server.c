@@ -158,10 +158,10 @@ void vTaskObdhServer(void)
 
                         break;
 
-                    case CMDPR_CMD_TURN_LED_ON:
-                        obdh_response.command = obdh_request.command;
-                        led_set(LED_SYSTEM);
-                        break;
+                    // case CMDPR_CMD_TURN_LED_ON:
+                    //     obdh_response.command = obdh_request.command;
+                    //     led_set(LED_SYSTEM);
+                    //     break;
                     
                     case 0x00:
                         /* Read mode */
