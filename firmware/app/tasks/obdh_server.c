@@ -137,9 +137,12 @@ void vTaskObdhServer(void)
                             break;
 
                         case CMDPR_PARAM_ANT_DEP_STATUS:
-                            sys_log_print_event_from_module(SYS_LOG_INFO, TASK_OBDH_SERVER_NAME, "Turning TTC LED On!");
-                            led_set(LED_SYSTEM);
-                            
+                            if (obdh_request.data.param_8 == 1)
+                            {
+                                sys_log_print_event_from_module(SYS_LOG_INFO, TASK_OBDH_SERVER_NAME, "Turning TTC LED On!");
+                                led_set(LED_FAULT);
+                            }    
+                            break;
 
                         default:
                             sys_log_print_event_from_module(SYS_LOG_ERROR, TASK_OBDH_SERVER_NAME, "Invalid write parameter.");

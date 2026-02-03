@@ -74,6 +74,7 @@ int radio_send(uint8_t *data, uint16_t len)
         sys_log_new_line();
 
         led_set(LED_DOWNLINK);
+        // led_set(LED_SYSTEM);
 
         if(si446x_tx_long_packet(data, len))
         {
@@ -86,7 +87,7 @@ int radio_send(uint8_t *data, uint16_t len)
         }
 
         led_clear(LED_DOWNLINK);
-
+        //led_clear(LED_SYSTEM);
         si446x_mutex_give();
     }
     else

@@ -46,6 +46,8 @@
 #include <drivers/spi_slave/spi_slave.h>
 #include <app/structs/ttc_data.h>
 
+#include <devices/leds/leds.h>
+
 #include "obdh.h"
 
 static int obdh_write_parameter(obdh_request_t *obdh_request);
@@ -103,17 +105,17 @@ int obdh_read_request(obdh_request_t *obdh_request)
             case CMDPR_CMD_READ_PARAM:
                 obdh_request->parameter = request[2];
 
-//                sys_log_print_event_from_module(SYS_LOG_INFO, OBDH_MODULE_NAME, "Read command received, parameter:");
-//                sys_log_print_hex(obdh_request->parameter);
-//                sys_log_new_line();
+                sys_log_print_event_from_module(SYS_LOG_INFO, OBDH_MODULE_NAME, "Read command received, parameter:");
+                sys_log_print_hex(obdh_request->parameter);
+                sys_log_new_line();
 
                 break;
             case CMDPR_CMD_WRITE_PARAM:
                 obdh_request->parameter = request[2];
 
-//                sys_log_print_event_from_module(SYS_LOG_INFO, OBDH_MODULE_NAME, "Write command received, parameter:");
-//                sys_log_print_hex(obdh_request->parameter);
-//                sys_log_new_line();
+                sys_log_print_event_from_module(SYS_LOG_INFO, OBDH_MODULE_NAME, "Write command received, parameter:");
+                sys_log_print_hex(obdh_request->parameter);
+                sys_log_new_line();
 
                 if ((obdh_request->parameter == CMDPR_PARAM_TX_ENABLE) || (obdh_request->parameter == CMDPR_PARAM_RESET_DEVICE))
                 {
@@ -123,6 +125,10 @@ int obdh_read_request(obdh_request_t *obdh_request)
                 {
                     obdh_request->data.param_32 = ((uint32_t)(request[3]) << 24U) | ((uint32_t)(request[4]) << 16U) |
                                                   ((uint32_t)(request[5]) << 8U) | ((uint32_t)(request[6]));
+                }
+                else if (obdh_request->parameter == CMDPR_PARAM_ANT_DEP_STATUS)
+                {
+                    led_set(LED_FAULT);
                 }
                 else
                 {
