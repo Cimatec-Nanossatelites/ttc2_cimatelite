@@ -47,6 +47,7 @@
 #include "flash/flash.h"
 #include "ina22x/ina22x.h"
 #include "tca4311a/tca4311a.h"
+#include "dev_sx1262/sx1262.h"
 
 #endif /* DRIVERS_H_ */
 

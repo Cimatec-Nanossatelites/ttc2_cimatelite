@@ -50,7 +50,9 @@ typedef uint16_t radio_temp_t;
 /**
  * \brief RSSI type.
  */
-typedef uint16_t radio_rssi_t;
+
+//TODO: VERIFICAR SE O TIPO DO RSSI EH 8 OU 16 BITS
+typedef uint8_t radio_rssi_t;
 
 /**
  * \brief Radio device initialization routine.

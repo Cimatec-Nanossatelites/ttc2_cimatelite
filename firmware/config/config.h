@@ -75,7 +75,7 @@
 #define CONFIG_PKT_ID_BEACON                            0x10
 
 /* Ports */
-#define CONFIG_SPI_PORT_0_SPEED_BPS                     1000000UL
+#define CONFIG_SPI_PORT_0_SPEED_BPS                     4000000UL
 
 /* Radio */
 #define SI446X_XO_TUNE_REG_VALUE                        97

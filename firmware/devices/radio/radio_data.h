@@ -49,7 +49,7 @@ typedef struct
     uint16_t current;               /**< Input current in mA. */
     uint16_t power;                 /**< Input power in mW. */
     uint8_t last_valid_tm;          /**< Last valid command (uplink packet ID). */
-    uint16_t rssi;                  /**< RSSI of the last valid command. */
+    uint8_t rssi;                  /**< RSSI of the last valid command. */
     uint8_t tx_enable;              /**< TX Enable 0=off, 1=on TODO */
     uint32_t rx_packet_counter;     /**< Number of total packets received */
     uint32_t tx_packet_counter;     /**< Number of total packets sent */
