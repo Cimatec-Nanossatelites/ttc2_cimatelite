@@ -99,7 +99,7 @@ void vTaskUplinkManager(void)
                                             "Receiving a new package:");
             sys_log_new_line();
 
-            if (radio_recv(rx_packet, 128U, 100U) > 0)
+            if (radio_recv(rx_packet, 220U, 100U) > 0)
             {
 //                if (radio_get_rssi(&ttc_data_buf.radio.rssi) == 0)
 //                {
@@ -125,6 +125,14 @@ void vTaskUplinkManager(void)
 
                     uplink_add_packet(ngham_decoded_packet,
                                       ngham_decoded_packet_len);
+
+                    sys_log_print_event_from_module(
+                            SYS_LOG_INFO, TASK_UPLINK_MANAGER_NAME,
+                            "Recebido: ");
+                        sys_log_new_line();
+                    sys_log_dump_hex(ngham_decoded_packet, ngham_decoded_packet_len);
+
+                    sys_log_new_line();
 
                     PCD_data_T payload = { 0 };
                     memcpy(&payload, &ngham_decoded_packet[1],
