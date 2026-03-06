@@ -112,7 +112,7 @@ static int lora_config(){
     ret = sx1262_set_lora_modulation_params(&dev_sx1262, SX1262_LORA_SF_10,
                                             SX1262_LORA_BANDWIDTH_125_KHZ,
                                             SX1262_LORA_CR_4_6,
-                                            SX1262_BOOL_FALSE);
+                                            SX1262_BOOL_TRUE);
 
     if (ret != SX1262_OK)
     {
@@ -141,7 +141,7 @@ static int lora_config(){
     }
 
     //Correct settings
-    ret = sx1262_set_lora_packet_params(&dev_sx1262, (uint16_t)10, SX1262_LORA_HEADER_EXPLICIT, (uint8_t)0xFF, SX1262_LORA_CRC_TYPE_ON, SX1262_BOOL_FALSE);
+    ret = sx1262_set_lora_packet_params(&dev_sx1262, (uint16_t)10, SX1262_LORA_HEADER_EXPLICIT, (uint8_t)0xFF, SX1262_LORA_CRC_TYPE_OFF, SX1262_BOOL_FALSE);
 
 //Test settings
 //    ret = sx1262_set_lora_packet_params(&dev_sx1262, (uint16_t) 10,
