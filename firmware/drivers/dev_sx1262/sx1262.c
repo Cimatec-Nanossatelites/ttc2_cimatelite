@@ -1193,7 +1193,7 @@ sx1262_status_t sx1262_handle_rx_done(sx1262_t *dev, uint8_t *buf, uint8_t *len)
 
 	*len = payload_len;
 
-	ret = sx1262_read_buffer(dev, 0x00, buf, *len);
+	ret = sx1262_read_buffer(dev, start_addr, buf, *len);
 
 	if (ret != SX1262_OK)
 		return ret;
