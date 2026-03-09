@@ -111,7 +111,7 @@ static int lora_config(){
 
     ret = sx1262_set_lora_modulation_params(&dev_sx1262, SX1262_LORA_SF_10,
                                             SX1262_LORA_BANDWIDTH_125_KHZ,
-                                            SX1262_LORA_CR_4_6,
+                                            SX1262_LORA_CR_4_5,
                                             SX1262_BOOL_FALSE);
 
     if (ret != SX1262_OK)
