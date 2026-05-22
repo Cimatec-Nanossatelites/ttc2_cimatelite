@@ -261,7 +261,7 @@ static int ngham_decode_byte(uint8_t d, uint8_t* buf)
     static uint32_t size_tag;
     static unsigned int length;
     int8_t errors;
-    uint32_t num_errors = 0U;
+    int num_errors = 0U;
     int err = -1;
 
     switch(decoder_state)

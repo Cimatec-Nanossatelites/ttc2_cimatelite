@@ -239,6 +239,8 @@ int rsc_decode(reed_solomon_t *rs, uint8_t *data, int *err_pos, int *num_err)
     int syn_error           = 0;
     int count               = 0;
 
+    memset(rs, 0, sizeof(reed_solomon_t));
+
     /* Form the syndromes; i.e., evaluate data(x) at roots of g(x) */
     for (i=0;i<(int)rs->nroots;i++)
     {

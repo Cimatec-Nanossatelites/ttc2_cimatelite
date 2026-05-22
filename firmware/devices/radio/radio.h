@@ -83,7 +83,7 @@ int radio_send(uint8_t *data, uint16_t len);
  *
  * \return The status/error code.
  */
-int radio_recv(uint8_t *data, uint16_t len, uint32_t timeout_ms);
+int radio_recv(uint8_t *data, uint16_t *len, uint32_t timeout_ms);
 
 /**
  * \brief Verifies if there are unread received bytes.

@@ -84,6 +84,12 @@ static int lora_config(){
         return -1;
     }
 
+    ret = sx1262_set_buffer_base_address(&dev_sx1262, 0x00, 0x00);
+
+    if(ret != 0){
+        return -1;
+    }
+
     ret = sx1262_set_packet_type(&dev_sx1262, PACKET_TYPE_LORA);
 
     if (ret != SX1262_OK)
@@ -95,7 +101,7 @@ static int lora_config(){
 //
 //    sx1262_calibrate_image(&dev_sx1262, 433000000);
 
-    ret = sx1262_set_frequency(&dev_sx1262, 433000000);
+    ret = sx1262_set_frequency(&dev_sx1262, 402000000);
 
     if (ret != SX1262_OK)
     {
@@ -141,7 +147,8 @@ static int lora_config(){
     }
 
     //Correct settings
-    ret = sx1262_set_lora_packet_params(&dev_sx1262, (uint16_t)10, SX1262_LORA_HEADER_EXPLICIT, (uint8_t)0xFF, SX1262_LORA_CRC_TYPE_ON, SX1262_BOOL_FALSE);
+    ret = sx1262_set_lora_packet_params(&dev_sx1262, (uint16_t)10, SX1262_LORA_HEADER_EXPLICIT,
+                                        (uint8_t)90, SX1262_LORA_CRC_TYPE_ON, SX1262_BOOL_FALSE);
 
 //Test settings
 //    ret = sx1262_set_lora_packet_params(&dev_sx1262, (uint16_t) 10,
@@ -231,19 +238,23 @@ int radio_send(uint8_t *data, uint16_t len)
     return err;
 }
 
-int radio_recv(uint8_t *data, uint16_t len, uint32_t timeout_ms)
+int radio_recv(uint8_t *data, uint16_t *len, uint32_t timeout_ms)
 {
 
     //TODO: VERIFICAR PORQUE LEN ESTA COM 16 BITS
 
-    sx1262_status_t ret = sx1262_handle_rx_done(&dev_sx1262, data, &len);
+    uint8_t temp_len = 0;
+
+    sx1262_status_t ret = sx1262_handle_rx_done(&dev_sx1262, data, &temp_len);
 
     if (ret != SX1262_OK)
     {
         return -1;
     }
 
-    return len;
+    *len = temp_len;
+
+    return *len;
 }
 
 int radio_available(void)
